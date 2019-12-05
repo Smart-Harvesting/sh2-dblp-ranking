@@ -6,6 +6,7 @@ Part of the DFG-funded research project ["Smart Harvesting II"](https://irgroup.
 
 An earlier version of this code has been used to produce the following publication:
 
+```bibtex
     @inproceedings{neumann2018prioritizing,
         title = {Prioritizing and Scheduling Conferences for Metadata Harvesting in dblp},
         author = {Neumann, Mandy and Michels, Christopher and Schaer, Philipp and Ralf, Schenkel},
@@ -21,6 +22,7 @@ An earlier version of this code has been used to produce the following publicati
         url = {https://dl.acm.org/citation.cfm?doid=3197026.3197069},
         year = 2018
     }
+```
     
  A preprint of this paper is available on [arXiv](https://arxiv.org/abs/1804.06169).
     
@@ -34,4 +36,24 @@ An earlier version of this code has been used to produce the following publicati
  
  ### Database schema
  
- TODO
+The application expects a table that can be created with the following DDL:
+
+```sql
+CREATE TABLE dblp_stream_scores (
+    stream_key varchar(255),
+    affil_score numeric,
+    citation_score numeric,
+    intl_score numeric,
+    prominence_score numeric,
+    size_score numeric,
+    rating_score numeric,
+    log_score_y2018m03 numeric,
+    log_score_y2018m04 numeric,
+    log_score_y2018m05 numeric,
+    log_score_y2018m06 numeric,
+    log_score_y2018m07 numeric,
+    log_score_y2018m08 numeric,
+    log_score_y2018m09 numeric,
+    log_score_y2018m10 numeric,
+    log_score_y2018m11 numeric)
+```
