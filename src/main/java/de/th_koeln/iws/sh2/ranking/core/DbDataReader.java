@@ -54,6 +54,13 @@ import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceRecord;
 import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceStream;
 import de.th_koeln.iws.sh2.ranking.analysis.data.Type;
 
+/**
+ * Implementation of a {@link DataReader} for reading the conference data from a
+ * (postgres) database.
+ *
+ * @author neumannm
+ *
+ */
 public class DbDataReader implements DataReader {
 
     private static Logger LOGGER = LogManager.getLogger(DbDataReader.class);
@@ -111,16 +118,19 @@ public class DbDataReader implements DataReader {
             LOGGER.debug("Internationality maximum: {}", maxIntlScore);
 
             double maxAffilScore = this.queryMaximum(String.format(selectMaxString, AFFILIATON_SCORE));
-            LOGGER.debug("Affiliation score maximum: {}", maxIntlScore);
+            LOGGER.debug("Affiliation score maximum: {}", maxAffilScore);
 
             double maxRatingScore = this.queryMaximum(String.format(selectMaxString, RATING_SCORE));
-            LOGGER.debug("Rating score maximum: {}", maxIntlScore);
+            LOGGER.debug("Rating score maximum: {}", maxRatingScore);
 
             double maxCiteScore = this.queryMaximum(String.format(selectMaxString, CITATION_SCORE));
+            LOGGER.debug("Citation score maximum: {}", maxCiteScore);
 
             double maxPromScore = this.queryMaximum(String.format(selectMaxString, PROMINENCE_SCORE));
+            LOGGER.debug("Prominence score maximum: {}", maxPromScore);
 
             double maxSizeScore = this.queryMaximum(String.format(selectMaxString, SIZE_SCORE));
+            LOGGER.debug("Size score maximum: {}", maxSizeScore);
 
             /*
              * get all results
@@ -153,13 +163,12 @@ public class DbDataReader implements DataReader {
 
             return new HashSet<>(streams);
         } catch (SQLException e) {
-            e.printStackTrace();
             if (connection != null) {
                 try {
-                    LOGGER.error("Transaction is being rolled back");
+                    LOGGER.error("An SQL error occured. Transaction is being rolled back.");
                     connection.rollback();
                 } catch (SQLException excep) {
-                    e.printStackTrace();
+                    LOGGER.error("Could not roll back transaction.", excep);
                 }
             }
         } finally {
@@ -170,13 +179,13 @@ public class DbDataReader implements DataReader {
                 }
                 connection.setAutoCommit(true);
             } catch (SQLException e) {
-                e.printStackTrace();
+                LOGGER.error("Database access error.", e);
             }
         }
         return new HashSet<>(streams);
     }
 
-    private Double queryMaximum(String selectMaxString) throws SQLException {
+    private Double queryMaximum(String selectMaxString) {
         final Instant start = Instant.now();
 
         final Connection connection = this.dbm.getConnection();
@@ -209,13 +218,17 @@ public class DbDataReader implements DataReader {
                     LOGGER.error("Transaction is being rolled back");
                     connection.rollback();
                 } catch (SQLException excep) {
-                    e.printStackTrace();
+                    LOGGER.error("Could not roll back transaction.", excep);
                 }
             }
         } finally {
             LOGGER.info("{} Reading maximum" + " (Duration: {})", "END", Duration.between(start, Instant.now()));
             if (stmt != null)
-                stmt.close();
+                try {
+                    stmt.close();
+                } catch (SQLException e) {
+                    LOGGER.error("Database access error.", e);
+                }
         }
         return null;
     }
@@ -300,7 +313,7 @@ public class DbDataReader implements DataReader {
                     LOGGER.error("Transaction is being rolled back");
                     connection.rollback();
                 } catch (SQLException excep) {
-                    e.printStackTrace();
+                    LOGGER.error("Could not roll back transaction.", excep);
                 }
             }
         } finally {
@@ -312,7 +325,7 @@ public class DbDataReader implements DataReader {
                 }
                 connection.setAutoCommit(true);
             } catch (SQLException e) {
-                e.printStackTrace();
+                LOGGER.error("Database access error.", e);
             }
         }
         return toReturn;
@@ -370,7 +383,7 @@ public class DbDataReader implements DataReader {
                     LOGGER.error("Transaction is being rolled back");
                     connection.rollback();
                 } catch (SQLException excep) {
-                    e.printStackTrace();
+                    LOGGER.error("Could not roll back transaction.", excep);
                 }
             }
         } finally {
@@ -417,7 +430,7 @@ public class DbDataReader implements DataReader {
         return monthsColumnMap;
     }
 
-    private Map<String, Double> getMaxPerColumn(Set<String> columns) throws SQLException {
+    private Map<String, Double> getMaxPerColumn(Set<String> columns) {
         Map<String, Double> maxPerColumn = new HashMap<>();
 
         String selectTemplate = "SELECT MAX(%s) " + "FROM %s";
