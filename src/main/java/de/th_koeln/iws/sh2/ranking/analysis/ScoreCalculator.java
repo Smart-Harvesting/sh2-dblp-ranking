@@ -2,6 +2,9 @@ package de.th_koeln.iws.sh2.ranking.analysis;
 
 import static java.time.temporal.ChronoUnit.MONTHS;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Month;
 import java.time.Year;
 import java.time.YearMonth;
@@ -11,8 +14,8 @@ import org.apache.logging.log4j.Logger;
 
 import com.google.common.collect.TreeMultimap;
 
-import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceStream;
 import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceRecord;
+import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceStream;
 import de.th_koeln.iws.sh2.ranking.analysis.data.util.Calculator;
 import de.th_koeln.iws.sh2.ranking.analysis.data.util.EvaluationConfiguration;
 
@@ -33,7 +36,8 @@ public class ScoreCalculator {
     /**
      * Constructor.
      *
-     * @param config set to true if only raw baseline score should be calculated.
+     * @param config
+     *            configuration for evaluation that sets the parameters for scoring
      */
     public ScoreCalculator(EvaluationConfiguration config) {
         this.config = config;
@@ -42,13 +46,17 @@ public class ScoreCalculator {
     /**
      * Calculate a score for a conference for a given point in time (MM-YYYY).
      *
-     * @param conf      the conference to be scored
-     * @param testyear  the evaluation year
-     * @param testmonth the evaluation month
+     * @param conf
+     *            the conference to be scored
+     * @param evalYM
+     *            the evaluation year-month
+     * @param conn
+     *            a database connection to write the parameters and score to a DB
+     *            table (optional)
      * @return conference score, will be 0.0 if there are no records older than the
      *         test year or if next conference entry is not yet expected
      */
-    public Double getScore(ConferenceStream conf, YearMonth evalYM) {
+    public Double getScore(ConferenceStream conf, YearMonth evalYM, Connection conn) {
         double minValue = 0.0;
 
         // get all records of this conference that have been created before the given
@@ -200,6 +208,34 @@ public class ScoreCalculator {
             double score = delayFactor * activityFactor * sizeFactor * ratingFactor * intlFactor * citeFactor
                     * prominenceFactor * affilFactor * logFactor;
             LOGGER.debug("[{}, {}] final score: {}", evalYM, streamKey, score);
+
+            if (null != conn) {
+                String insertStmt = "INSERT INTO ranking("
+                        + "conf_key, score, interval, month, delay, last_entry, expected, activity, rating, prominence, internationality, size, affiliations, log"
+                        + ") " + "VALUES" + "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+                try (PreparedStatement pstmt = conn.prepareStatement(insertStmt)) {
+                    pstmt.setString(1, conf.getKey());
+                    pstmt.setDouble(2, score);
+                    pstmt.setInt(3, (int) medianInterval);
+                    pstmt.setString(4, modeMonth.name());
+                    pstmt.setInt(5, (int) delay);
+                    pstmt.setString(6, lastYearMonth.toString());
+                    pstmt.setString(7, expectedNextEntry.toString());
+                    pstmt.setFloat(8, (float) activityFactor);
+                    pstmt.setFloat(9, (float) ratingFactor);
+                    pstmt.setFloat(10, (float) prominenceFactor);
+                    pstmt.setFloat(11, (float) intlFactor);
+                    pstmt.setFloat(12, (float) sizeFactor);
+                    pstmt.setFloat(13, (float) affilFactor);
+                    pstmt.setFloat(14, (float) logFactor);
+
+                    pstmt.executeUpdate();
+                } catch (SQLException e) {
+                    LOGGER.error(e.getMessage());
+                }
+            }
+
             return score;
         }
         return minValue;

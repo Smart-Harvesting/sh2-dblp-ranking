@@ -286,7 +286,7 @@ public class EvaluateApplication {
          * Go through _all_ conferences and score each one
          */
         for (ConferenceStream conf : confs) {
-            Double score = scorer.getScore(conf, evalYM);
+            Double score = scorer.getScore(conf, evalYM, null);
             if (score != null)
                 scored.put(conf, score);
         }
