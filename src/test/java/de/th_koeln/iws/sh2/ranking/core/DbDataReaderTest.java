@@ -1,6 +1,5 @@
 package de.th_koeln.iws.sh2.ranking.core;
 
-import java.sql.SQLException;
 import java.util.Collection;
 
 import org.junit.Assert;
@@ -10,12 +9,18 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.google.common.collect.Multimap;
+
+import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceRecord;
 import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceStream;
 
 class DbDataReaderTest {
 
+    static DbDataReader reader;
+
     @BeforeAll
     static void setUpBeforeClass() throws Exception {
+        reader = new DbDataReader(DatabaseManager.getInstance());
     }
 
     @AfterAll
@@ -31,17 +36,17 @@ class DbDataReaderTest {
     }
 
     @Test
-    void test() {
-        DbDataReader reader = new DbDataReader(DatabaseManager.getInstance());
+    void testReadScores() {
+        Collection<ConferenceStream> streams = DbDataReaderTest.reader.readScores();
 
-        try {
-            Collection<ConferenceStream> streams = reader.readScores();
+        Assert.assertEquals(4658, streams.size());
+    }
 
-            Assert.assertTrue(streams.size() == 4658);
+    @Test
+    void testReadRecords() {
+        Multimap<String, ConferenceRecord> readRecords = DbDataReaderTest.reader.readRecords();
 
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        Assert.assertEquals(4395, readRecords.keySet().size());
     }
 
 }

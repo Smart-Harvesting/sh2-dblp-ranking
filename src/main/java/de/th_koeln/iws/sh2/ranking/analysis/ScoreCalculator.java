@@ -107,7 +107,8 @@ public class ScoreCalculator {
                 // intervalAge = eventAgeInMonths / medianIntervalInMonths;
                 final double intervalAge = lastYearMonth.until(evalYM, MONTHS) / (double) medianInterval;
                 LOGGER.debug("[{}, {}] interval age in months: {}", evalYM, streamKey, intervalAge);
-                // active(c) = 1 / (1 + intervalAge^2) global max 1 with intervalAge = 0; lim(activity(c)) = 0 for intervalAge -> +Infinity;
+                // active(c) = 1 / (1 + intervalAge^2) global max 1 with intervalAge = 0;
+                // lim(activity(c)) = 0 for intervalAge -> +Infinity;
                 final double activityScore = 1d / (1d + (intervalAge * intervalAge));
                 // w_active(c) = 1 + active(c);
                 activityFactor = 1 + activityScore;

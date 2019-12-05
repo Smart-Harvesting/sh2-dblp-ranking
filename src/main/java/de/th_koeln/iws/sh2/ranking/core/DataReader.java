@@ -2,9 +2,9 @@ package de.th_koeln.iws.sh2.ranking.core;
 
 import java.util.Set;
 
-import de.th_koeln.iws.sh2.ranking.analysis.data.DataStream;
+import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceStream;
 
 public interface DataReader {
 
-    public Set<DataStream<?>> readData();
+    public Set<ConferenceStream> getData();
 }

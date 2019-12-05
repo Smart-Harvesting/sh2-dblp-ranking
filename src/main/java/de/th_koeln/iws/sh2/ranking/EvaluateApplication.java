@@ -37,6 +37,7 @@ import org.dblp.rbo.model.SimilarityReport;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Table;
 import com.google.common.collect.Tables;
@@ -50,8 +51,8 @@ import de.th_koeln.iws.sh2.ranking.analysis.data.util.ResultExporter;
 import de.th_koeln.iws.sh2.ranking.analysis.evaluation.Goldstandard;
 import de.th_koeln.iws.sh2.ranking.analysis.evaluation.RelevanceRanker;
 import de.th_koeln.iws.sh2.ranking.config.PropertiesUtil;
-import de.th_koeln.iws.sh2.ranking.core.DbDataReader;
 import de.th_koeln.iws.sh2.ranking.core.DatabaseManager;
+import de.th_koeln.iws.sh2.ranking.core.DbDataReader;
 
 public class EvaluateApplication {
     private static Logger LOGGER = LogManager.getLogger(EvaluateApplication.class);
@@ -63,6 +64,8 @@ public class EvaluateApplication {
     /* The evaluation year */
     // TODO make this a configurable parameter, too
     private static final int EVAL_YEAR = 2018;
+    // TODO make this a configurable parameter, too
+    private static final boolean SIMPLE_EVAL = true;
 
     private static void setRootLoggerLevel(Level level) {
         LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
@@ -71,40 +74,63 @@ public class EvaluateApplication {
         loggerConfig.setLevel(level);
     }
 
-    public static void main(String[] args) {
-
-        setRootLoggerLevel(Level.INFO);
-
+    private static void setupOutputFolders() {
         SETUP_PROPERTIES = PropertiesUtil.loadExternalDataSetupConfig();
         outputFolder = Paths.get(SETUP_PROPERTIES.getProperty("output.basedir", "/dblp/eval/"));
         rawOutputFolder = outputFolder.resolve("raw");
         rawOutputFolder.toFile().mkdirs();
+    }
 
-        boolean simple = true; // TODO als Parameter oder so machen
+    private static List<EvaluationConfiguration> setupConfigurations() {
+        List<EvaluationConfiguration> configs;
+        if (SIMPLE_EVAL) {
+            configs = createSimpleConfigs();
+        } else {
+            configs = createComplexConfigs();
+        }
+        return configs;
+    }
 
+    private static List<Month> setupEvaluationMonths(String[] args) {
         List<Month> evalMonths = null;
-        // = ImmutableList.of(Month.MAY, Month.JUNE, Month.JULY, Month.AUGUST,
-        // Month.SEPTEMBER,
-        // Month.OCTOBER, Month.NOVEMBER);
         if (args.length > 0) {
             evalMonths = parseArgs(args);
         }
         if ((null == evalMonths) || (evalMonths.size() == 0)) {
             // no specific month(s) provided - take all months of the year
-            LOGGER.info("No month privided or arguments could not be parsed - evaluation with all months of the year.");
-            evalMonths = Arrays.asList(Month.values());
+            LOGGER.info(
+                    "No month privided or arguments could not be parsed - evaluation with all months (for which log data is available).");
+            // evalMonths = Arrays.asList(Month.values());
+            evalMonths = ImmutableList.of(Month.MAY, Month.JUNE, Month.JULY, Month.AUGUST, Month.SEPTEMBER,
+                    Month.OCTOBER, Month.NOVEMBER);
         }
         LOGGER.info(String.format("Months for evaluation: %s", evalMonths));
+        return evalMonths;
+    }
+
+    /**
+     * Read the set of conferences to evaluate from the database.
+     *
+     * @return set of conferences
+     */
+    private static Set<ConferenceStream> getConferencesFromDatabase() {
+        DbDataReader reader = new DbDataReader(DatabaseManager.getInstance());
+        Set<ConferenceStream> data = reader.getData();
+        return Collections.unmodifiableSet(data);
+    }
+
+    public static void main(String[] args) {
+
+        setRootLoggerLevel(Level.INFO);
+
+        setupOutputFolders();
+
+        final List<Month> evalMonths = setupEvaluationMonths(args);
 
         final Set<ConferenceStream> allConfs = getConferencesFromDatabase();
         LOGGER.info(String.format("Done reading %d conferences from database", allConfs.size()));
 
-        List<EvaluationConfiguration> configs;
-        if (simple) {
-            configs = createSimpleConfigs();
-        } else {
-            configs = createComplexConfigs();
-        }
+        final List<EvaluationConfiguration> configs = setupConfigurations();
         LOGGER.info(String.format("Done creating %d configurations for evaluation", configs.size()));
 
         runEvaluationPipeline(allConfs, evalMonths, configs);
@@ -402,16 +428,6 @@ public class EvaluateApplication {
             }
         }
         return monthArgs;
-    }
-
-    /**
-     * Read the set of conferences to evaluate from the database.
-     *
-     * @return set of conferences
-     */
-    private static Set<ConferenceStream> getConferencesFromDatabase() {
-        DbDataReader reader = new DbDataReader(DatabaseManager.getInstance());
-        return Collections.unmodifiableSet(reader.getAsSetOfStreams());
     }
 
     /**

@@ -14,7 +14,7 @@ import org.apache.logging.log4j.Logger;
 import de.th_koeln.iws.sh2.ranking.config.PropertiesUtil;
 
 /**
- * @author michels, mandy
+ * @author michels, neumannm
  *
  */
 public class DatabaseManager {

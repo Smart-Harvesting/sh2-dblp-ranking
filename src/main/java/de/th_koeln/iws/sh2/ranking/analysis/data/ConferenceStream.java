@@ -25,13 +25,15 @@ import de.th_koeln.iws.sh2.ranking.analysis.data.util.RecordByCDateComparator;
  * @author neumannm
  *
  */
-public class ConferenceStream extends DataStream<ConferenceRecord> {
+public class ConferenceStream implements Comparable<ConferenceStream> {
+
+    private String key;
+    private Collection<ConferenceRecord> records;
 
     private ListMultimap<Year, ConferenceRecord> recordsByEvtYear;
 
     private Double avgRating, intlScore, citScore, promScore, sizeScore, affilScore;
-
-    Map<YearMonth, Double> logScores;
+    private Map<YearMonth, Double> logScores;
 
     /**
      * Constructor.
@@ -42,7 +44,8 @@ public class ConferenceStream extends DataStream<ConferenceRecord> {
      *            all records belonging to a conference (i.e. proceedings)
      */
     public ConferenceStream(String streamKey, Collection<ConferenceRecord> records) {
-        super(streamKey, records);
+        this.key = streamKey;
+        this.records = records;
         this.createRecordsByEvtYearMap();
     }
 
@@ -108,7 +111,8 @@ public class ConferenceStream extends DataStream<ConferenceRecord> {
     public TreeMultimap<YearMonth, ConferenceRecord> getRecordsCreatedBefore(Year year) {
         Predicate<? super ConferenceRecord> predicate = r -> Year.from(r.getcDate()).isBefore(year);
         Ordering<YearMonth> keyOrdering = Ordering.natural().reverse();
-        Ordering<ConferenceRecord> valueOrdering = Ordering.from((r2, r1) -> new RecordByCDateComparator().compare(r2, r1));
+        Ordering<ConferenceRecord> valueOrdering = Ordering
+                .from((r2, r1) -> new RecordByCDateComparator().compare(r2, r1));
         return this.filterAndMapEventRecords(predicate, keyOrdering, valueOrdering);
     }
 
@@ -125,7 +129,8 @@ public class ConferenceStream extends DataStream<ConferenceRecord> {
     public TreeMultimap<YearMonth, ConferenceRecord> getRecordsCreatedUntilIncludingYear(Year year) {
         Predicate<? super ConferenceRecord> predicate = r -> !Year.from(r.getcDate()).isAfter(year);
         Ordering<YearMonth> keyOrdering = Ordering.natural().reverse();
-        Ordering<ConferenceRecord> valueOrdering = Ordering.from((r1, r2) -> new RecordByCDateComparator().compare(r1, r2));
+        Ordering<ConferenceRecord> valueOrdering = Ordering
+                .from((r1, r2) -> new RecordByCDateComparator().compare(r1, r2));
         return this.filterAndMapEventRecords(predicate, keyOrdering, valueOrdering);
     }
 
@@ -141,19 +146,22 @@ public class ConferenceStream extends DataStream<ConferenceRecord> {
     public TreeMultimap<YearMonth, ConferenceRecord> getRecordsCreatedBefore(YearMonth yearMonth) {
         Predicate<? super ConferenceRecord> predicate = r -> YearMonth.from(r.getcDate()).isBefore(yearMonth);
         Ordering<YearMonth> keyOrdering = Ordering.natural().reverse();
-        Ordering<ConferenceRecord> valueOrdering = Ordering.from((r2, r1) -> new RecordByCDateComparator().compare(r2, r1));
+        Ordering<ConferenceRecord> valueOrdering = Ordering
+                .from((r2, r1) -> new RecordByCDateComparator().compare(r2, r1));
         return this.filterAndMapEventRecords(predicate, keyOrdering, valueOrdering);
     }
 
     public TreeMultimap<YearMonth, ConferenceRecord> getRecordsCreatedInYear(Year year) {
         Predicate<? super ConferenceRecord> predicate = r -> r.getcDate().getYear() == year.getValue();
         Ordering<YearMonth> keyOrdering = Ordering.natural().reverse();
-        Ordering<ConferenceRecord> valueOrdering = Ordering.from((r2, r1) -> new RecordByCDateComparator().compare(r2, r1));
+        Ordering<ConferenceRecord> valueOrdering = Ordering
+                .from((r2, r1) -> new RecordByCDateComparator().compare(r2, r1));
         return this.filterAndMapEventRecords(predicate, keyOrdering, valueOrdering);
     }
 
-    private TreeMultimap<YearMonth, ConferenceRecord> filterAndMapEventRecords(Predicate<? super ConferenceRecord> predicate,
-            Comparator<YearMonth> keyOrdering, Comparator<ConferenceRecord> valueOrdering) {
+    private TreeMultimap<YearMonth, ConferenceRecord> filterAndMapEventRecords(
+            Predicate<? super ConferenceRecord> predicate, Comparator<YearMonth> keyOrdering,
+            Comparator<ConferenceRecord> valueOrdering) {
 
         TreeMultimap<YearMonth, ConferenceRecord> eventRecordMapping = TreeMultimap.create(keyOrdering, valueOrdering);
 
@@ -271,4 +279,34 @@ public class ConferenceStream extends DataStream<ConferenceRecord> {
         this.logScores = map;
     }
 
+    /*
+     * (non-Javadoc)
+     *
+     * @see java.lang.Comparable#compareTo(java.lang.Object)
+     *
+     * Conference streams are compared by their keys for sorting
+     */
+    @Override
+    public int compareTo(ConferenceStream o) {
+        return this.key.compareTo(o.key);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        return (obj instanceof ConferenceStream) && ((ConferenceStream) obj).key.equals(this.key);
+    }
+
+    @Override
+    public int hashCode() {
+        return this.key.hashCode();
+    }
+
+    @Override
+    public String toString() {
+        return String.format("DataStream %s with %d records.", this.key, this.records.size());
+    }
+
+    public void setRecords(Collection<ConferenceRecord> records) {
+        this.records = records;
+    }
 }

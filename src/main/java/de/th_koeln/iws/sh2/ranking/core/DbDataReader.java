@@ -18,13 +18,8 @@ import static de.th_koeln.iws.sh2.ranking.core.util.ColumnNames.RECORD_TYPE;
 import static de.th_koeln.iws.sh2.ranking.core.util.ColumnNames.SIZE_SCORE;
 import static de.th_koeln.iws.sh2.ranking.core.util.ColumnNames.STREAM_KEY;
 import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.HISTORICAL_RECORDS;
-import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.RAW_AFFILIATON_SCORES;
-import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.RAW_CITATION_SCORES;
-import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.RAW_INTL_SCORES;
 import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.RAW_LOG_SCORES;
-import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.RAW_PROMINENCE_SCORES;
-import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.RAW_RATING_SCORES;
-import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.RAW_SIZE_SCORES;
+import static de.th_koeln.iws.sh2.ranking.core.util.TableNames.SCORES;
 import static de.th_koeln.iws.sh2.ranking.core.util.ViewNames.PROCEEDINGS_VIEW;
 
 import java.sql.Connection;
@@ -39,12 +34,11 @@ import java.time.Year;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -58,7 +52,6 @@ import com.google.common.collect.Table;
 
 import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceRecord;
 import de.th_koeln.iws.sh2.ranking.analysis.data.ConferenceStream;
-import de.th_koeln.iws.sh2.ranking.analysis.data.DataStream;
 import de.th_koeln.iws.sh2.ranking.analysis.data.Type;
 
 public class DbDataReader implements DataReader {
@@ -67,58 +60,46 @@ public class DbDataReader implements DataReader {
 
     private DatabaseManager dbm;
 
-    private List<ConferenceStream> conferenceList;
-    private List<ConferenceRecord> streamRecordList;
-    private Multimap<String, ConferenceRecord> streamRecordMultimap;
-
-    private Map<String, Double> streamRatingsMap;
-    private Map<String, Double> streamCitationsMap;
-    private Map<String, Double> streamProminenceMap;
-    private Map<String, Double> streamInternationalityScores;
-    private Map<String, Double> streamAffilScores;
-    private Map<String, Double> streamSizesMap;
-    Table<String, YearMonth, Double> streamLogScores;
+    private Set<ConferenceStream> conferenceStreamSet;
 
     final String logFormat = "{}: Reading data from table '{}'";
-
-    @SuppressWarnings("unused")
-    private DbDataReader() {
-        // private default constructor to prevent construction of object w/o parameter
-    }
 
     public DbDataReader(DatabaseManager dbm) {
         this.dbm = dbm;
     }
 
     @Override
-    public Set<DataStream<?>> readData() {
-        try {
-            this.streamRecordList = this.read();
-            this.readStreamRatings();
-            this.readStreamCitations();
-            this.readStreamProminence();
-            this.readStreamInternationalityScores();
-            this.readStreamSizes();
-            this.readStreamAffiliationScores();
-            this.readStreamLogScores();
-        } catch (SQLException e) {
-            e.printStackTrace();
+    public Set<ConferenceStream> getData() {
+        if (null == this.conferenceStreamSet) {
+            this.readFromDatabase();
         }
-        return null;
+        return this.conferenceStreamSet;
     }
 
-    protected Collection<ConferenceStream> readScores() throws SQLException {
-        String streamScoresTable = "public.dblp_stream_scores"; //TODO ebenfalls als Konstante auslagern
+    private void readFromDatabase() {
+        Multimap<String, ConferenceRecord> streamRecords = this.readRecords();
+        Set<ConferenceStream> conferencescores = this.readScores();
+        Table<String, YearMonth, Double> streamLogScores = this.readStreamLogScores();
 
-        LOGGER.info(this.logFormat, "START", streamScoresTable);
+        for (ConferenceStream conferenceStream : conferencescores) {
+            String key = conferenceStream.getKey();
+            conferenceStream.setRecords(streamRecords.get(key));
+            conferenceStream.setLogScores(streamLogScores.row(key));
+        }
+
+        this.conferenceStreamSet = Collections.unmodifiableSet(conferencescores);
+    }
+
+    protected Set<ConferenceStream> readScores() {
+        LOGGER.info(this.logFormat, "START", SCORES);
         final Instant start = Instant.now();
 
         final Connection connection = this.dbm.getConnection();
 
         Statement stmt = null;
         ResultSet rs = null;
-        String selectMaxString = "SELECT MAX(%s) " + "FROM " + streamScoresTable;
-        String selectString = "SELECT * " + "FROM " + streamScoresTable;
+        String selectMaxString = "SELECT MAX(%s) " + "FROM " + SCORES;
+        String selectString = "SELECT * " + "FROM " + SCORES;
 
         Collection<ConferenceStream> streams = new ArrayList<>();
         try {
@@ -170,7 +151,7 @@ public class DbDataReader implements DataReader {
                 streams.add(conf);
             }
 
-            return streams;
+            return new HashSet<>(streams);
         } catch (SQLException e) {
             e.printStackTrace();
             if (connection != null) {
@@ -182,240 +163,17 @@ public class DbDataReader implements DataReader {
                 }
             }
         } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", streamScoresTable,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
+            try {
+                LOGGER.info(this.logFormat + " (Duration: {})", "END", SCORES, Duration.between(start, Instant.now()));
+                if (stmt != null) {
+                    stmt.close();
+                }
+                connection.setAutoCommit(true);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
-        return streams;
-    }
-
-    private void readStreamInternationalityScores() throws SQLException {
-
-        LOGGER.info(this.logFormat, "START", RAW_INTL_SCORES);
-        final Instant start = Instant.now();
-
-        this.streamInternationalityScores = new TreeMap<>();
-        String selectMaxString = String.format("SELECT MAX(%s) " + "FROM %s", INTL_SCORE, RAW_INTL_SCORES);
-        String selectString = String.format("SELECT %s, %s " + "FROM %s;", STREAM_KEY, INTL_SCORE, RAW_INTL_SCORES);
-
-        final Connection connection = this.dbm.getConnection();
-
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            connection.setAutoCommit(false);
-
-            stmt = connection.createStatement();
-
-            double maxIntlScore = this.queryMaximum(selectMaxString);
-            LOGGER.debug("Internationality maximum: {}", maxIntlScore);
-
-            /*
-             * get all results
-             */
-            stmt.executeQuery(selectString);
-            connection.commit();
-
-            rs = stmt.getResultSet();
-
-            while (rs.next()) {
-                String streamKey = rs.getString(STREAM_KEY);
-                Double intScore = rs.getDouble(INTL_SCORE);
-                LOGGER.debug("[{}] raw intl score: {}", streamKey, intScore);
-                intScore = intScore / maxIntlScore;
-                LOGGER.debug("[{}] averaged intl score: {}", streamKey, intScore);
-                if (null != this.streamInternationalityScores.put(streamKey, intScore)) {
-                    LOGGER.error("Stream key is not unique in internationality score table!");
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-            if (connection != null) {
-                try {
-                    LOGGER.error("Transaction is being rolled back");
-                    connection.rollback();
-                } catch (SQLException excep) {
-                    e.printStackTrace();
-                }
-            }
-        } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_INTL_SCORES,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
-        }
-    }
-
-    private void readStreamAffiliationScores() throws SQLException {
-
-        LOGGER.info(this.logFormat, "START", RAW_AFFILIATON_SCORES);
-        final Instant start = Instant.now();
-
-        this.streamAffilScores = new TreeMap<>();
-        String selectMaxString = String.format("SELECT MAX(%s) " + "FROM %s", AFFILIATON_SCORE, RAW_AFFILIATON_SCORES);
-        String selectString = String.format("SELECT %s, %s " + "FROM %s;", STREAM_KEY, AFFILIATON_SCORE,
-                RAW_AFFILIATON_SCORES);
-
-        final Connection connection = this.dbm.getConnection();
-
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            connection.setAutoCommit(false);
-
-            stmt = connection.createStatement();
-
-            double maxAffilScore = this.queryMaximum(selectMaxString);
-            LOGGER.debug("Affiliation maximum: {}", maxAffilScore);
-
-            /*
-             * get all results
-             */
-            stmt.executeQuery(selectString);
-            connection.commit();
-
-            rs = stmt.getResultSet();
-
-            while (rs.next()) {
-                String streamKey = rs.getString(STREAM_KEY);
-                Double affilScore = rs.getDouble(AFFILIATON_SCORE);
-                LOGGER.debug("[{}] raw affil score: {}", streamKey, affilScore);
-                affilScore = affilScore / maxAffilScore;
-                LOGGER.debug("[{}] averaged affil score: {}", streamKey, affilScore);
-                if (null != this.streamAffilScores.put(streamKey, affilScore)) {
-                    LOGGER.error("Stream key is not unique in affiliations score table!");
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-            if (connection != null) {
-                try {
-                    LOGGER.error("Transaction is being rolled back");
-                    connection.rollback();
-                } catch (SQLException excep) {
-                    e.printStackTrace();
-                }
-            }
-        } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_INTL_SCORES,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
-        }
-    }
-
-    private void readStreamLogScores() throws SQLException {
-
-        LOGGER.info(this.logFormat, "START", RAW_LOG_SCORES);
-        final Instant start = Instant.now();
-
-        this.streamLogScores = HashBasedTable.create();
-
-        String selectString = String.format("SELECT * " + "FROM %s;", RAW_LOG_SCORES);
-
-        final Connection connection = this.dbm.getConnection();
-
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            connection.setAutoCommit(false);
-
-            stmt = connection.createStatement();
-
-            /*
-             * get all results
-             */
-            stmt.executeQuery(selectString);
-            connection.commit();
-
-            rs = stmt.getResultSet();
-
-            Map<String, YearMonth> yearMonthsColumnMap = this.getYearMonthsOfLogs(rs);
-            Map<String, Double> maxPerColumn = this.getMaxPerColumn(yearMonthsColumnMap.keySet());
-
-            while (rs.next()) {
-
-                String streamKey = rs.getString(STREAM_KEY);
-
-                for (String columnName : yearMonthsColumnMap.keySet()) {
-                    Double logScore = rs.getDouble(columnName);
-                    LOGGER.debug("[{}, {}] raw log score: {}", streamKey, columnName, logScore);
-
-                    // teilen durch max
-                    logScore = logScore / maxPerColumn.get(columnName);
-                    LOGGER.debug("[{}, {}] averaged log score: {}", streamKey, columnName, logScore);
-
-                    this.streamLogScores.put(streamKey, yearMonthsColumnMap.get(columnName), logScore);
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-            if (connection != null) {
-                try {
-                    LOGGER.error("Transaction is being rolled back");
-                    connection.rollback();
-                } catch (SQLException excep) {
-                    e.printStackTrace();
-                }
-            }
-        } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_LOG_SCORES,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
-        }
-    }
-
-    private Map<String, YearMonth> getYearMonthsOfLogs(ResultSet rs) throws SQLException {
-        Map<String, YearMonth> monthsColumnMap = new HashMap<>();
-
-        Pattern yearPattern = Pattern.compile("(?<=y)(19|20)\\d{2}(?=m)");
-        Pattern monthPattern = Pattern.compile("(?<=m)\\d{2}$");
-
-        Matcher yearMatcher = yearPattern.matcher("");
-        Matcher monthMatcher = monthPattern.matcher("");
-
-        String year, month;
-
-        int columnCount = rs.getMetaData().getColumnCount();
-        for (int i = 1; i <= columnCount; i++) {
-            String columnName = rs.getMetaData().getColumnName(i);
-            yearMatcher.reset(columnName);
-            if (yearMatcher.find()) {
-                year = yearMatcher.group();
-                monthMatcher.reset(columnName);
-                if (monthMatcher.find()) {
-                    month = monthMatcher.group();
-                    YearMonth ym = YearMonth.of(Integer.parseInt(year), Integer.parseInt(month));
-                    monthsColumnMap.put(columnName, ym);
-                }
-            }
-
-        }
-        return monthsColumnMap;
-
-    }
-
-    private Map<String, Double> getMaxPerColumn(Set<String> columns) throws SQLException {
-        Map<String, Double> maxPerColumn = new HashMap<>();
-
-        String selectTemplate = "SELECT MAX(%s) " + "FROM %s";
-
-        for (String column : columns) {
-            String selectMaxString = String.format(selectTemplate, column, RAW_LOG_SCORES);
-            Double max = this.queryMaximum(selectMaxString);
-            maxPerColumn.put(column, max);
-        }
-
-        return maxPerColumn;
+        return new HashSet<>(streams);
     }
 
     private Double queryMaximum(String selectMaxString) throws SQLException {
@@ -462,265 +220,12 @@ public class DbDataReader implements DataReader {
         return null;
     }
 
-    private void readStreamProminence() throws SQLException {
-
-        LOGGER.info(this.logFormat, "START", RAW_PROMINENCE_SCORES);
-        final Instant start = Instant.now();
-
-        this.streamProminenceMap = new TreeMap<>();
-        String selectMaxProminenceString = String.format("SELECT MAX(%s) " + "FROM %s", PROMINENCE_SCORE,
-                RAW_PROMINENCE_SCORES);
-        String selectString = String.format("SELECT %s, %s " + "FROM %s;", STREAM_KEY, PROMINENCE_SCORE,
-                RAW_PROMINENCE_SCORES);
-
-        final Connection connection = this.dbm.getConnection();
-
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            connection.setAutoCommit(false);
-
-            stmt = connection.createStatement();
-            /*
-             * get max prominence value
-             */
-            double maxProminence = this.queryMaximum(selectMaxProminenceString);
-            LOGGER.debug("Prominence maximum: {}", maxProminence);
-
-            /*
-             * get all results
-             */
-            stmt.executeQuery(selectString);
-            connection.commit();
-
-            rs = stmt.getResultSet();
-
-            while (rs.next()) {
-                String streamKey = rs.getString(STREAM_KEY);
-                Double prominence = rs.getDouble(PROMINENCE_SCORE);
-                LOGGER.debug("[{}] raw prominence score: {}", streamKey, prominence);
-                prominence = prominence / maxProminence;
-                LOGGER.debug("[{}] averaged prominence score: {}", streamKey, prominence);
-                if (null != this.streamProminenceMap.put(streamKey, prominence)) {
-                    LOGGER.error("Stream key is not unique in prominence score table!");
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-            if (connection != null) {
-                try {
-                    LOGGER.error("Transaction is being rolled back");
-                    connection.rollback();
-                } catch (SQLException excep) {
-                    e.printStackTrace();
-                }
-            }
-        } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_PROMINENCE_SCORES,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
-        }
-
-    }
-
-    private void readStreamCitations() throws SQLException {
-
-        LOGGER.info(this.logFormat, "START", RAW_CITATION_SCORES);
-        final Instant start = Instant.now();
-
-        this.streamCitationsMap = new TreeMap<>();
-        String selectMaxCitationString = String.format("SELECT MAX(%s) " + "FROM %s;", CITATION_SCORE,
-                RAW_CITATION_SCORES);
-        String selectString = String.format("SELECT %s, %s " + "FROM %s;", STREAM_KEY, CITATION_SCORE,
-                RAW_CITATION_SCORES);
-
-        final Connection connection = this.dbm.getConnection();
-
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            connection.setAutoCommit(false);
-
-            stmt = connection.createStatement();
-
-            /*
-             * get max citation value
-             */
-            double maxCitation = this.queryMaximum(selectMaxCitationString);
-            LOGGER.debug("Citation maximum: {}", maxCitation);
-
-            /*
-             * get all results
-             */
-            stmt.executeQuery(selectString);
-            connection.commit();
-
-            rs = stmt.getResultSet();
-
-            while (rs.next()) {
-                String streamKey = rs.getString(STREAM_KEY);
-                Double citations = rs.getDouble(CITATION_SCORE);
-                LOGGER.debug("[{}] raw citation score: {}", streamKey, citations);
-                citations = citations / maxCitation;
-                LOGGER.debug("[{}] averaged citation score: {}", streamKey, citations);
-                if (null != this.streamCitationsMap.put(streamKey, citations)) {
-                    LOGGER.error("Stream key is not unique in citations scores table!");
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-            if (connection != null) {
-                try {
-                    LOGGER.error("Transaction is being rolled back");
-                    connection.rollback();
-                } catch (SQLException excep) {
-                    e.printStackTrace();
-                }
-            }
-        } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_CITATION_SCORES,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
-        }
-    }
-
-    private void readStreamRatings() throws SQLException {
-        LOGGER.info(this.logFormat, "START", RAW_RATING_SCORES);
-        final Instant start = Instant.now();
-
-        this.streamRatingsMap = new TreeMap<>();
-
-        String selectMaxRatingString = String.format("SELECT MAX(%s) " + "FROM %s;", RATING_SCORE, RAW_RATING_SCORES);
-        String selectString = String.format("SELECT %s, %s " + "FROM %s;", STREAM_KEY, RATING_SCORE, RAW_RATING_SCORES);
-
-        final Connection connection = this.dbm.getConnection();
-
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            connection.setAutoCommit(false);
-
-            stmt = connection.createStatement();
-
-            /*
-             * get max ranking
-             */
-            double maxRating = this.queryMaximum(selectMaxRatingString);
-            LOGGER.debug("Rating maximum: {}", maxRating);
-
-            /*
-             * get all streams
-             */
-            stmt.executeQuery(selectString);
-            connection.commit();
-
-            rs = stmt.getResultSet();
-
-            while (rs.next()) {
-                String streamKey = rs.getString(STREAM_KEY);
-                Double avgRating = rs.getDouble(RATING_SCORE);
-                LOGGER.debug("[{}] raw ratings score: {}", streamKey, avgRating);
-                avgRating = avgRating / maxRating;
-                LOGGER.debug("[{}] averaged ratings score: {}", streamKey, avgRating);
-                if (null != this.streamRatingsMap.put(streamKey, avgRating)) {
-                    LOGGER.error("Stream key is not unique in rating scores table!");
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-            if (connection != null) {
-                try {
-                    LOGGER.error("Transaction is being rolled back");
-                    connection.rollback();
-                } catch (SQLException excep) {
-                    e.printStackTrace();
-                }
-            }
-        } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_RATING_SCORES,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
-        }
-    }
-
-    private void readStreamSizes() throws SQLException {
-        LOGGER.info(this.logFormat, "START", RAW_RATING_SCORES);
-        final Instant start = Instant.now();
-
-        this.streamSizesMap = new TreeMap<>();
-
-        String selectMaxString = String.format("SELECT MAX(%s) " + "FROM %s;", SIZE_SCORE, RAW_SIZE_SCORES);
-        String selectString = String.format("SELECT %s, %s " + "FROM %s;", STREAM_KEY, SIZE_SCORE, RAW_SIZE_SCORES);
-
-        final Connection connection = this.dbm.getConnection();
-
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            connection.setAutoCommit(false);
-
-            stmt = connection.createStatement();
-
-            /*
-             * get max avg size
-             */
-
-            double maxSize = this.queryMaximum(selectMaxString);
-            LOGGER.debug("Size maximum: {}", maxSize);
-
-            /*
-             * get all streams
-             */
-            stmt.executeQuery(selectString);
-            connection.commit();
-
-            rs = stmt.getResultSet();
-
-            while (rs.next()) {
-                String streamKey = rs.getString(STREAM_KEY);
-                Double avgSize = rs.getDouble(SIZE_SCORE);
-                LOGGER.debug("[{}] raw size score: {}", streamKey, avgSize);
-                avgSize = avgSize / maxSize;
-                LOGGER.debug("[{}] averaged size score: {}", streamKey, avgSize);
-                if (null != this.streamSizesMap.put(streamKey, avgSize)) {
-                    LOGGER.error("Stream key is not unique in size scores table!");
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-            if (connection != null) {
-                try {
-                    LOGGER.error("Transaction is being rolled back");
-                    connection.rollback();
-                } catch (SQLException excep) {
-                    e.printStackTrace();
-                }
-            }
-        } finally {
-            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_RATING_SCORES,
-                    Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
-        }
-    }
-
-    private List<ConferenceRecord> read() throws SQLException {
+    protected Multimap<String, ConferenceRecord> readRecords() {
 
         LOGGER.info(this.logFormat, "START", "joined table");
         final Instant start = Instant.now();
 
-        final List<ConferenceRecord> toReturn = new ArrayList<>();
+        final Multimap<String, ConferenceRecord> toReturn = MultimapBuilder.hashKeys().arrayListValues().build();
 
         Statement stmt = null;
         ResultSet rs = null;
@@ -784,77 +289,146 @@ public class DbDataReader implements DataReader {
 
                 LOGGER.debug("Read stream record: {}", record);
 
-                toReturn.add(record);
+                boolean put = toReturn.put(streamKey, record);
+                if (!put)
+                    LOGGER.debug("Record has not been added to key-record map: " + record);
             }
         } catch (SQLException e) {
-            // JDBCTutorialUtilities.printSQLException(e);
             e.printStackTrace();
             if (connection != null) {
                 try {
                     LOGGER.error("Transaction is being rolled back");
                     connection.rollback();
                 } catch (SQLException excep) {
-                    // JDBCTutorialUtilities.printSQLException(excep);
                     e.printStackTrace();
                 }
             }
         } finally {
             LOGGER.info(this.logFormat + " (Duration: {})", "END", "joined table",
                     Duration.between(start, Instant.now()));
-            if (stmt != null)
-                stmt.close();
-            connection.setAutoCommit(true);
+            try {
+                if (stmt != null) {
+                    stmt.close();
+                }
+                connection.setAutoCommit(true);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return toReturn;
     }
 
-    /**
-     * @return the read data as Multimap
-     */
-    public Multimap<String, ConferenceRecord> getAsMultiMap() {
-        if (null == this.streamRecordMultimap) {
-            // build a mapping from stream key to a collection of records
-            this.streamRecordMultimap = MultimapBuilder.hashKeys().arrayListValues().build();
-            for (ConferenceRecord conferenceRecord : this.streamRecordList) {
-                boolean put = this.streamRecordMultimap.put(conferenceRecord.getStreamKey(), conferenceRecord);
-                if (!put)
-                    LOGGER.debug("Record has not been added to key-record map: " + conferenceRecord);
+    private Table<String, YearMonth, Double> readStreamLogScores() {
+        Table<String, YearMonth, Double> streamLogScores;
+        LOGGER.info(this.logFormat, "START", RAW_LOG_SCORES);
+        final Instant start = Instant.now();
+
+        streamLogScores = HashBasedTable.create();
+
+        String selectString = String.format("SELECT * " + "FROM %s;", RAW_LOG_SCORES);
+
+        final Connection connection = this.dbm.getConnection();
+
+        Statement stmt = null;
+        ResultSet rs = null;
+        try {
+            connection.setAutoCommit(false);
+
+            stmt = connection.createStatement();
+
+            /*
+             * get all results
+             */
+            stmt.executeQuery(selectString);
+            connection.commit();
+
+            rs = stmt.getResultSet();
+
+            Map<String, YearMonth> yearMonthsColumnMap = this.getYearMonthsOfLogs(rs);
+            Map<String, Double> maxPerColumn = this.getMaxPerColumn(yearMonthsColumnMap.keySet());
+
+            while (rs.next()) {
+
+                String streamKey = rs.getString(STREAM_KEY);
+
+                for (String columnName : yearMonthsColumnMap.keySet()) {
+                    Double logScore = rs.getDouble(columnName);
+                    LOGGER.debug("[{}, {}] raw log score: {}", streamKey, columnName, logScore);
+
+                    // teilen durch max
+                    logScore = logScore / maxPerColumn.get(columnName);
+                    LOGGER.debug("[{}, {}] averaged log score: {}", streamKey, columnName, logScore);
+
+                    streamLogScores.put(streamKey, yearMonthsColumnMap.get(columnName), logScore);
+                }
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+            if (connection != null) {
+                try {
+                    LOGGER.error("Transaction is being rolled back");
+                    connection.rollback();
+                } catch (SQLException excep) {
+                    e.printStackTrace();
+                }
+            }
+        } finally {
+            LOGGER.info(this.logFormat + " (Duration: {})", "END", RAW_LOG_SCORES,
+                    Duration.between(start, Instant.now()));
+            try {
+                if (stmt != null) {
+                    stmt.close();
+                }
+                connection.setAutoCommit(true);
+            } catch (SQLException e) {
+                e.printStackTrace();
             }
         }
-        return this.streamRecordMultimap;
+        return streamLogScores;
     }
 
-    /**
-     * @return the read data as a List of ConferenceStreams
-     */
-    public List<ConferenceStream> getAsListOfStreams() {
-        if (null == this.conferenceList) {
-            this.conferenceList = new ArrayList<>();
-            for (String streamKey : this.getAsMultiMap().keySet()) {
-                Collection<ConferenceRecord> records = this.streamRecordMultimap.get(streamKey);
-                ConferenceStream conf = new ConferenceStream(streamKey, records);
-                conf.setRatingScore(this.streamRatingsMap.get(streamKey));
-                conf.setIntlScore(this.streamInternationalityScores.get(streamKey));
-                conf.setCitScore(this.streamCitationsMap.get(streamKey));
-                conf.setPromScore(this.streamProminenceMap.get(streamKey));
-                conf.setSizeScore(this.streamSizesMap.get(streamKey));
-                conf.setAffilScore(this.streamAffilScores.get(streamKey));
-                conf.setLogScores(this.streamLogScores.row(streamKey));
-                this.conferenceList.add(conf);
+    private Map<String, YearMonth> getYearMonthsOfLogs(ResultSet rs) throws SQLException {
+        Map<String, YearMonth> monthsColumnMap = new HashMap<>();
+
+        Pattern yearPattern = Pattern.compile("(?<=y)(19|20)\\d{2}(?=m)");
+        Pattern monthPattern = Pattern.compile("(?<=m)\\d{2}$");
+
+        Matcher yearMatcher = yearPattern.matcher("");
+        Matcher monthMatcher = monthPattern.matcher("");
+
+        String year, month;
+
+        int columnCount = rs.getMetaData().getColumnCount();
+        for (int i = 1; i <= columnCount; i++) {
+            String columnName = rs.getMetaData().getColumnName(i);
+            yearMatcher.reset(columnName);
+            if (yearMatcher.find()) {
+                year = yearMatcher.group();
+                monthMatcher.reset(columnName);
+                if (monthMatcher.find()) {
+                    month = monthMatcher.group();
+                    YearMonth ym = YearMonth.of(Integer.parseInt(year), Integer.parseInt(month));
+                    monthsColumnMap.put(columnName, ym);
+                }
             }
+
         }
-        LOGGER.debug("Size of conference list: " + this.conferenceList.size());
-        return this.conferenceList;
+        return monthsColumnMap;
     }
 
-    /**
-     * @return the read data as a Set of ConferenceStreams
-     */
-    public Set<ConferenceStream> getAsSetOfStreams() {
-        TreeSet<ConferenceStream> conferenceSet = new TreeSet<>(this.getAsListOfStreams());
+    private Map<String, Double> getMaxPerColumn(Set<String> columns) throws SQLException {
+        Map<String, Double> maxPerColumn = new HashMap<>();
 
-        LOGGER.debug("Size of conference set: " + conferenceSet.size());
+        String selectTemplate = "SELECT MAX(%s) " + "FROM %s";
 
-        return conferenceSet;
+        for (String column : columns) {
+            String selectMaxString = String.format(selectTemplate, column, RAW_LOG_SCORES);
+            Double max = this.queryMaximum(selectMaxString);
+            maxPerColumn.put(column, max);
+        }
+
+        return maxPerColumn;
     }
+
 }
