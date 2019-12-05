@@ -110,6 +110,7 @@ public class ScoreCalculator {
 
             double activityFactor = 1.0, ratingFactor = 1.0, intlFactor = 1.0, citeFactor = 1.0, prominenceFactor = 1.0,
                     sizeFactor = 1.0, affilFactor = 1.0, logFactor = 1.0;
+            double activityScore = 0;
 
             if (this.config.isUseActivityScore()) {
                 // intervalAge = eventAgeInMonths / medianIntervalInMonths;
@@ -117,7 +118,7 @@ public class ScoreCalculator {
                 LOGGER.debug("[{}, {}] interval age in months: {}", evalYM, streamKey, intervalAge);
                 // active(c) = 1 / (1 + intervalAge^2) global max 1 with intervalAge = 0;
                 // lim(activity(c)) = 0 for intervalAge -> +Infinity;
-                final double activityScore = 1d / (1d + (intervalAge * intervalAge));
+                activityScore = 1d / (1d + (intervalAge * intervalAge));
                 // w_active(c) = 1 + active(c);
                 activityFactor = 1 + activityScore;
                 LOGGER.debug("[{}, {}] activity factor score: {}", evalYM, streamKey, activityFactor);
@@ -219,16 +220,16 @@ public class ScoreCalculator {
                     pstmt.setDouble(2, score);
                     pstmt.setInt(3, (int) medianInterval);
                     pstmt.setString(4, modeMonth.name());
-                    pstmt.setInt(5, (int) delay);
+                    pstmt.setInt(5, (int) medianDelay);
                     pstmt.setString(6, lastYearMonth.toString());
                     pstmt.setString(7, expectedNextEntry.toString());
-                    pstmt.setFloat(8, (float) activityFactor);
-                    pstmt.setFloat(9, (float) ratingFactor);
-                    pstmt.setFloat(10, (float) prominenceFactor);
-                    pstmt.setFloat(11, (float) intlFactor);
-                    pstmt.setFloat(12, (float) sizeFactor);
-                    pstmt.setFloat(13, (float) affilFactor);
-                    pstmt.setFloat(14, (float) logFactor);
+                    pstmt.setFloat(8, (float) activityScore);
+                    pstmt.setFloat(9, conf.getAvgRating().floatValue());
+                    pstmt.setFloat(10, conf.getProminence().floatValue());
+                    pstmt.setFloat(11, conf.getIntlScore().floatValue());
+                    pstmt.setFloat(12, conf.getAvgSize().floatValue());
+                    pstmt.setFloat(13, conf.getAffilScore().floatValue());
+                    pstmt.setFloat(14, conf.getLogScores().get(evalYM).floatValue());
 
                     pstmt.executeUpdate();
                 } catch (SQLException e) {
