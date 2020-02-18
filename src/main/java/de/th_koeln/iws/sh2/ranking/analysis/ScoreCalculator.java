@@ -2,12 +2,14 @@ package de.th_koeln.iws.sh2.ranking.analysis;
 
 import static java.time.temporal.ChronoUnit.MONTHS;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.time.Month;
 import java.time.Year;
 import java.time.YearMonth;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Map.Entry;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -56,7 +58,7 @@ public class ScoreCalculator {
      * @return conference score, will be 0.0 if there are no records older than the
      *         test year or if next conference entry is not yet expected
      */
-    public Double getScore(ConferenceStream conf, YearMonth evalYM, Connection conn) {
+    public Double getScore(ConferenceStream conf, YearMonth evalYM, StringBuffer jsonResult) {
         double minValue = 0.0;
 
         // get all records of this conference that have been created before the given
@@ -210,31 +212,35 @@ public class ScoreCalculator {
                     * prominenceFactor * affilFactor * logFactor;
             LOGGER.debug("[{}, {}] final score: {}", evalYM, streamKey, score);
 
-            if (null != conn) {
-                String insertStmt = "INSERT INTO ranking("
-                        + "conf_key, score, interval, month, delay, last_entry, expected, activity, rating, prominence, internationality, size, affiliations, log"
-                        + ") " + "VALUES" + "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+            if (null != jsonResult) {
+                jsonResult.append("{\n");
+                Map<String, String> results = new HashMap<>();
+                results.put("conf_key", conf.getKey());
+                results.put("score", String.format(Locale.ENGLISH, "%1$,.3f", score));
+                results.put("interval", String.valueOf(medianInterval));
+                results.put("month", modeMonth.name());
+                results.put("delay", String.valueOf(medianDelay));
+                results.put("last_entry", lastYearMonth.toString());
+                results.put("expected", expectedNextEntry.toString());
+                results.put("activity", String.format(Locale.ENGLISH, "%1$,.3f", activityScore));
+                results.put("rating", String.format(Locale.ENGLISH, "%1$,.3f", conf.getAvgRating()));
+                results.put("prominence", String.format(Locale.ENGLISH, "%1$,.3f", conf.getProminence()));
+                results.put("internationality", String.format(Locale.ENGLISH, "%1$,.3f", conf.getIntlScore()));
+                results.put("size", String.format(Locale.ENGLISH, "%1$,.3f", conf.getAvgSize()));
+                results.put("affiliations", String.format(Locale.ENGLISH, "%1$,.3f", conf.getAffilScore()));
+                results.put("log", String.format(Locale.ENGLISH, "%1$,.3f", conf.getLogScores().get(evalYM)));
 
-                try (PreparedStatement pstmt = conn.prepareStatement(insertStmt)) {
-                    pstmt.setString(1, conf.getKey());
-                    pstmt.setDouble(2, score);
-                    pstmt.setInt(3, (int) medianInterval);
-                    pstmt.setString(4, modeMonth.name());
-                    pstmt.setInt(5, (int) medianDelay);
-                    pstmt.setString(6, lastYearMonth.toString());
-                    pstmt.setString(7, expectedNextEntry.toString());
-                    pstmt.setFloat(8, (float) activityScore);
-                    pstmt.setFloat(9, conf.getAvgRating().floatValue());
-                    pstmt.setFloat(10, conf.getProminence().floatValue());
-                    pstmt.setFloat(11, conf.getIntlScore().floatValue());
-                    pstmt.setFloat(12, conf.getAvgSize().floatValue());
-                    pstmt.setFloat(13, conf.getAffilScore().floatValue());
-                    pstmt.setFloat(14, conf.getLogScores().get(evalYM).floatValue());
-
-                    pstmt.executeUpdate();
-                } catch (SQLException e) {
-                    LOGGER.error(e.getMessage());
+                Iterator<Entry<String, String>> iterator = results.entrySet().iterator();
+                while (iterator.hasNext()) {
+                    Entry<String, String> entry = iterator.next();
+                    jsonResult.append("\"");
+                    jsonResult.append(entry.getKey());
+                    jsonResult.append("\"").append(":").append("\"").append(entry.getValue()).append("\"");
+                    if (iterator.hasNext())
+                        jsonResult.append(",");
+                    jsonResult.append("\n");
                 }
+                jsonResult.append("}\n");
             }
 
             return score;
